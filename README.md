@@ -18,7 +18,7 @@ No video, images, or derived data ever leave your machine. See
 One-day prototype, built in milestones:
 
 - [x] 1. Extension scaffold, side panel, camera preview with live face mesh
-- [ ] 2. Raw (uncalibrated) gaze dot overlaid on the page
+- [x] 2. Raw (uncalibrated) gaze dot overlaid on the page
 - [ ] 3. 9-point calibration + smoothing
 - [ ] 4. Interactive-element highlighting + wink-to-click
 - [ ] 5. Dwell scroll

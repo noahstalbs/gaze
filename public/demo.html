@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gaze demo page</title>
+    <style>
+      :root { color-scheme: dark; }
+      body {
+        margin: 0;
+        font: 16px/1.5 system-ui, sans-serif;
+        background: #15171c;
+        color: #e8eaed;
+      }
+      main { max-width: 760px; margin: 0 auto; padding: 32px 24px 120px; }
+      h1 { letter-spacing: 0.04em; }
+      .muted { color: #9aa0a6; }
+      section { margin: 48px 0; }
+      .button-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 20px;
+      }
+      .button-grid button {
+        font: inherit;
+        font-size: 20px;
+        padding: 28px 12px;
+        border-radius: 12px;
+        border: 1px solid #333842;
+        background: #1e2128;
+        color: #e8eaed;
+        cursor: pointer;
+      }
+      .button-grid button:hover { border-color: #00e5a0; }
+      #click-log {
+        margin-top: 16px;
+        min-height: 1.5em;
+        color: #00e5a0;
+        font-variant-numeric: tabular-nums;
+      }
+      input, textarea {
+        font: inherit;
+        width: 100%;
+        box-sizing: border-box;
+        padding: 14px;
+        border-radius: 10px;
+        border: 1px solid #333842;
+        background: #1e2128;
+        color: #e8eaed;
+      }
+      textarea { min-height: 90px; margin-top: 16px; }
+      .filler {
+        padding: 28px;
+        border-radius: 12px;
+        background: #1a1d23;
+        margin: 20px 0;
+      }
+      .filler:nth-child(even) { background: #20242c; }
+      .filler a { color: #00e5a0; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Gaze demo page</h1>
+      <p class="muted">
+        Everything Gaze can do, in one place: big click targets, text fields,
+        links, and a long scrollable run below. Open the Gaze side panel and
+        look around.
+      </p>
+
+      <section>
+        <h2>Click targets</h2>
+        <div class="button-grid" id="targets">
+          <button>One</button><button>Two</button><button>Three</button>
+          <button>Four</button><button>Five</button><button>Six</button>
+        </div>
+        <div id="click-log">No clicks yet.</div>
+      </section>
+
+      <section>
+        <h2>Text input</h2>
+        <input id="text-input" type="text" placeholder="Focus me and type with the gaze keyboard" />
+        <textarea id="text-area" placeholder="Or me — a textarea"></textarea>
+      </section>
+
+      <section>
+        <h2>Scroll run</h2>
+        <div id="filler"></div>
+      </section>
+    </main>
+    <script src="/content.js"></script>
+    <script src="/demo.js"></script>
+  </body>
+</html>

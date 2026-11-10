@@ -5,12 +5,17 @@ import {
   FilesetResolver,
   type FaceLandmarkerResult,
 } from '@mediapipe/tasks-vision';
+import { EmaSmoother, extractFeatures, rawGazePoint } from './gaze';
+import { TabLink } from './tablink';
 
 const video = document.getElementById('video') as HTMLVideoElement;
 const overlay = document.getElementById('overlay') as HTMLCanvasElement;
 const cameraMsg = document.getElementById('camera-msg') as HTMLDivElement;
 const statusPill = document.getElementById('status-pill') as HTMLSpanElement;
 const btnGrant = document.getElementById('btn-grant') as HTMLButtonElement;
+
+const btnToggleGaze = document.getElementById('btn-toggle-gaze') as HTMLButtonElement;
+const btnDemo = document.getElementById('btn-demo') as HTMLButtonElement;
 
 const stat = {
   face: document.getElementById('stat-face') as HTMLElement,
@@ -148,15 +153,25 @@ async function main() {
   const ctx = overlay.getContext('2d')!;
   const utils = new DrawingUtils(ctx);
 
-  let lastVideoTime = -1;
+  const tabLink = new TabLink();
+  const smoother = new EmaSmoother(0.3);
+  let gazeEnabled = true;
+
+  btnToggleGaze.disabled = false;
+  btnToggleGaze.classList.add('active');
+  btnToggleGaze.addEventListener('click', () => {
+    gazeEnabled = !gazeEnabled;
+    btnToggleGaze.classList.toggle('active', gazeEnabled);
+  });
+
+  btnDemo.addEventListener('click', () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL('demo.html') });
+  });
+
   let fps = 0;
   let lastFrameAt = performance.now();
 
-  const loop = () => {
-    requestAnimationFrame(loop);
-    if (video.readyState < 2 || video.currentTime === lastVideoTime) return;
-    lastVideoTime = video.currentTime;
-
+  const processFrame = () => {
     const now = performance.now();
     const result = landmarker.detectForVideo(video, now);
 
@@ -166,15 +181,41 @@ async function main() {
     drawMesh(utils, ctx, result);
 
     const hasFace = result.faceLandmarks.length > 0;
+    const features = hasFace ? extractFeatures(result) : null;
+    let gaze: { x: number; y: number } | null = null;
+    if (features) {
+      const raw = rawGazePoint(features);
+      gaze = smoother.push(raw.x, raw.y);
+    } else {
+      smoother.reset();
+    }
+
+    if (gazeEnabled) {
+      tabLink.send({
+        type: 'GAZE_FRAME',
+        x: gaze?.x ?? 0.5,
+        y: gaze?.y ?? 0.5,
+        hasFace: gaze !== null,
+        t: now,
+      });
+    }
+
     stat.face.textContent = hasFace ? 'yes' : 'no';
     stat.fps.textContent = fps.toFixed(0);
     // Raw model blendshape names; which one maps to the user's physical left
     // eye (the image is mirrored) gets verified in the wink-detection milestone.
     stat.blinkL.textContent = hasFace ? blendshape(result, 'eyeBlinkLeft').toFixed(2) : '–';
     stat.blinkR.textContent = hasFace ? blendshape(result, 'eyeBlinkRight').toFixed(2) : '–';
-    stat.gaze.textContent = '–';
+    stat.gaze.textContent = gaze ? `${(gaze.x * 100).toFixed(0)}, ${(gaze.y * 100).toFixed(0)} %` : '–';
   };
-  requestAnimationFrame(loop);
+
+  // requestVideoFrameCallback fires once per camera frame (~30 Hz) instead of
+  // per display refresh, so detection runs at the true camera rate.
+  const onFrame = () => {
+    processFrame();
+    video.requestVideoFrameCallback(onFrame);
+  };
+  video.requestVideoFrameCallback(onFrame);
 }
 
 main().catch((err) => {
