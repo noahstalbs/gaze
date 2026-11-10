@@ -13,9 +13,11 @@ import {
   isUsableCalibration,
   type Calibration,
 } from './calibration';
+import { DiagBuffer } from './diag';
 import { OneEuroFilter } from './oneeuro';
 import { loadSettings, saveSettings, SLIDERS, type Settings } from './settings';
 import { TabLink } from './tablink';
+import { BlinkFallbackDetector, WinkDetector } from './wink';
 import type { CalCancelMsg, CalResultMsg } from '../shared/messages';
 
 const video = document.getElementById('video') as HTMLVideoElement;
@@ -26,8 +28,10 @@ const btnGrant = document.getElementById('btn-grant') as HTMLButtonElement;
 
 const btnCalibrate = document.getElementById('btn-calibrate') as HTMLButtonElement;
 const btnToggleGaze = document.getElementById('btn-toggle-gaze') as HTMLButtonElement;
+const btnWinkMode = document.getElementById('btn-wink-mode') as HTMLButtonElement;
 const btnDemo = document.getElementById('btn-demo') as HTMLButtonElement;
 const btnResetCal = document.getElementById('btn-reset-cal') as HTMLButtonElement;
+const btnDumpDiag = document.getElementById('btn-dump-diag') as HTMLButtonElement;
 const slidersBox = document.getElementById('sliders') as HTMLDivElement;
 
 const stat = {
@@ -249,6 +253,35 @@ async function main() {
 
   btnResetCal.addEventListener('click', () => setCalibrated(null));
 
+  const winkDetector = new WinkDetector();
+  const blinkDetector = new BlinkFallbackDetector();
+  const diag = new DiagBuffer();
+
+  const renderWinkMode = () => {
+    btnWinkMode.textContent = settings.clickMode === 'wink' ? 'Mode: wink' : 'Mode: blink';
+  };
+  btnWinkMode.disabled = false;
+  renderWinkMode();
+  btnWinkMode.addEventListener('click', () => {
+    settings.clickMode = settings.clickMode === 'wink' ? 'blink' : 'wink';
+    saveSettings(settings);
+    winkDetector.reset();
+    blinkDetector.reset();
+    renderWinkMode();
+  });
+
+  btnDumpDiag.addEventListener('click', async () => {
+    const json = diag.dump({ settings, calibrated: calibrationData !== null });
+    try {
+      await navigator.clipboard.writeText(json);
+      btnDumpDiag.textContent = 'Copied!';
+    } catch {
+      console.log('[gaze] diagnostics dump:', json);
+      btnDumpDiag.textContent = 'Clipboard failed — logged to console';
+    }
+    setTimeout(() => (btnDumpDiag.textContent = 'Dump diagnostics (10s)'), 1500);
+  });
+
   chrome.runtime.onMessage.addListener((msg: CalResultMsg | CalCancelMsg) => {
     if (msg.type === 'CAL_RESULT') {
       calibrating = false;
@@ -271,6 +304,16 @@ async function main() {
   let fps = 0;
   let lastFrameAt = performance.now();
 
+  // Closing one eye drags the iris landmarks, so the moment any lid starts
+  // closing we freeze the estimate at where the gaze was ~100ms earlier
+  // (before the lid movement contaminated it) and hold until the lid
+  // reopens — so the click lands where the user was looking.
+  const FREEZE_LID = 0.3;
+  const FREEZE_MIN_MS = 200;
+  const FREEZE_MAX_MS = 1500;
+  const history: Array<{ t: number; x: number; y: number }> = [];
+  let freeze: { x: number; y: number; since: number } | null = null;
+
   const processFrame = () => {
     const now = performance.now();
     const result = landmarker.detectForVideo(video, now);
@@ -281,6 +324,8 @@ async function main() {
     drawMesh(utils, ctx, result);
 
     const hasFace = result.faceLandmarks.length > 0;
+    const blinkL = hasFace ? blendshape(result, 'eyeBlinkLeft') : 0;
+    const blinkR = hasFace ? blendshape(result, 'eyeBlinkRight') : 0;
     const features = hasFace ? extractFeatures(result) : null;
     let gaze: { x: number; y: number } | null = null;
     let feat: number[] | undefined;
@@ -296,6 +341,41 @@ async function main() {
     } else {
       filterX.reset();
       filterY.reset();
+      freeze = null;
+      history.length = 0;
+    }
+
+    if (gaze) {
+      history.push({ t: now, ...gaze });
+      while (history.length && now - history[0].t > 400) history.shift();
+
+      const lidMax = Math.max(blinkL, blinkR);
+      if (!freeze && lidMax >= FREEZE_LID) {
+        let past = history[0];
+        for (const h of history) if (h.t <= now - 100) past = h;
+        freeze = { x: past.x, y: past.y, since: now };
+      } else if (freeze) {
+        const age = now - freeze.since;
+        if ((age >= FREEZE_MIN_MS && lidMax < FREEZE_LID) || age > FREEZE_MAX_MS) {
+          freeze = null;
+        }
+      }
+      if (freeze) gaze = { x: freeze.x, y: freeze.y };
+    }
+
+    // Blendshape names are anatomical (the face's own left/right), so
+    // eyeBlinkLeft is the user's physical left eye — no mirror swap.
+    const winkParams = {
+      threshold: settings.winkThreshold,
+      holdMs: settings.winkHoldMs,
+      refractoryMs: settings.refractoryMs,
+    };
+    let fired: 'left' | 'right' | null = null;
+    if (hasFace && !calibrating) {
+      fired =
+        settings.clickMode === 'wink'
+          ? winkDetector.update(blinkL, blinkR, now, winkParams)
+          : blinkDetector.update(blinkL, blinkR, now, winkParams);
     }
 
     if (gazeEnabled) {
@@ -306,15 +386,27 @@ async function main() {
         hasFace: gaze !== null,
         t: now,
         feat: calibrating ? feat : undefined,
+        snap: settings.snapRadius,
+        frozen: freeze !== null,
       });
+      if (fired) tabLink.send({ type: 'WINK', side: fired });
     }
+
+    diag.push({
+      t: now,
+      x: gaze?.x ?? null,
+      y: gaze?.y ?? null,
+      bl: blinkL,
+      br: blinkR,
+      face: hasFace,
+      frozen: freeze !== null,
+    });
+    if (fired) diag.markEvent(`${settings.clickMode}:${fired}`);
 
     stat.face.textContent = hasFace ? 'yes' : 'no';
     stat.fps.textContent = fps.toFixed(0);
-    // Raw model blendshape names; which one maps to the user's physical left
-    // eye (the image is mirrored) gets verified in the wink-detection milestone.
-    stat.blinkL.textContent = hasFace ? blendshape(result, 'eyeBlinkLeft').toFixed(2) : '–';
-    stat.blinkR.textContent = hasFace ? blendshape(result, 'eyeBlinkRight').toFixed(2) : '–';
+    stat.blinkL.textContent = hasFace ? blinkL.toFixed(2) : '–';
+    stat.blinkR.textContent = hasFace ? blinkR.toFixed(2) : '–';
     stat.gaze.textContent = gaze ? `${(gaze.x * 100).toFixed(0)}, ${(gaze.y * 100).toFixed(0)} %` : '–';
   };
 

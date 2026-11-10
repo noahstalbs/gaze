@@ -15,9 +15,19 @@ export interface GazeFrameMsg {
   t: number;
   /** Raw feature vector; only attached while calibration is running. */
   feat?: number[];
+  /** Snap radius in px; piggybacked so the content script needs no settings sync. */
+  snap: number;
+  /** True while the estimate is held still because an eye is closing. */
+  frozen: boolean;
 }
 
-export type ContentMsg = GazeFrameMsg;
+export interface WinkMsg {
+  type: 'WINK';
+  /** User's physical side; left = primary click, right = context menu. */
+  side: 'left' | 'right';
+}
+
+export type ContentMsg = GazeFrameMsg | WinkMsg;
 
 // Control messages sent panel -> content via chrome.tabs.sendMessage.
 export interface CalStartMsg {

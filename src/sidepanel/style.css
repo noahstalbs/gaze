@@ -196,7 +196,8 @@ button.active {
   accent-color: var(--accent);
 }
 
-.tuning #btn-reset-cal {
+.tuning #btn-reset-cal,
+.tuning #btn-dump-diag {
   margin-top: 12px;
   width: 100%;
 }

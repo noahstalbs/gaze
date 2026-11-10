@@ -43,16 +43,50 @@ function solve(A: number[][], b: number[]): number[] | null {
   return M.map((row, i) => row[n] / M[i][i]);
 }
 
-export function fitCalibration(samples: CalSample[]): Calibration | null {
-  if (samples.length < MIN_SAMPLES) return null;
-  const n = samples.length;
-  const d = samples[0].f.length;
+/**
+ * Per-point outlier rejection: drop the TRIM_FRACTION of samples furthest
+ * from their calibration point's centroid in standardized feature space.
+ * Catches frames where the eye was still mid-saccade or mid-blink.
+ */
+const TRIM_FRACTION = 0.2;
+
+function trimOutliers(samples: CalSample[], mean: number[], std: number[]): CalSample[] {
+  const d = mean.length;
+  const groups = new Map<string, CalSample[]>();
+  for (const s of samples) {
+    const key = `${s.x},${s.y}`;
+    groups.get(key)?.push(s) ?? groups.set(key, [s]);
+  }
+  const kept: CalSample[] = [];
+  for (const group of groups.values()) {
+    const centroid = new Array<number>(d).fill(0);
+    for (const s of group) {
+      for (let j = 0; j < d; j++) centroid[j] += (s.f[j] - mean[j]) / std[j] / group.length;
+    }
+    const scored = group.map((s) => {
+      let dist = 0;
+      for (let j = 0; j < d; j++) dist += ((s.f[j] - mean[j]) / std[j] - centroid[j]) ** 2;
+      return { s, dist };
+    });
+    scored.sort((a, b) => a.dist - b.dist);
+    kept.push(...scored.slice(0, Math.max(1, Math.ceil(group.length * (1 - TRIM_FRACTION)))).map((e) => e.s));
+  }
+  return kept;
+}
+
+export function fitCalibration(allSamples: CalSample[]): Calibration | null {
+  if (allSamples.length < MIN_SAMPLES) return null;
+  const d = allSamples[0].f.length;
 
   const mean = new Array<number>(d).fill(0);
   const std = new Array<number>(d).fill(0);
-  for (const s of samples) for (let j = 0; j < d; j++) mean[j] += s.f[j] / n;
-  for (const s of samples) for (let j = 0; j < d; j++) std[j] += (s.f[j] - mean[j]) ** 2 / n;
+  for (const s of allSamples) for (let j = 0; j < d; j++) mean[j] += s.f[j] / allSamples.length;
+  for (const s of allSamples)
+    for (let j = 0; j < d; j++) std[j] += (s.f[j] - mean[j]) ** 2 / allSamples.length;
   for (let j = 0; j < d; j++) std[j] = Math.max(Math.sqrt(std[j]), 1e-6);
+
+  const samples = trimOutliers(allSamples, mean, std);
+  const n = samples.length;
 
   // Design matrix rows: [1, z1..zd] with standardized features.
   const dim = d + 1;

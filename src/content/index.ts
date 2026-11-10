@@ -38,18 +38,144 @@ function ensureDot(): HTMLDivElement {
   return dot;
 }
 
-function onGazeFrame(msg: { x: number; y: number; hasFace: boolean }): void {
+function onGazeFrame(msg: GazeFrameMsg): void {
   const d = ensureDot();
-  const px = msg.x * window.innerWidth - DOT_SIZE / 2;
-  const py = msg.y * window.innerHeight - DOT_SIZE / 2;
-  d.style.transform = `translate3d(${px.toFixed(1)}px, ${py.toFixed(1)}px, 0)`;
+  const px = msg.x * window.innerWidth;
+  const py = msg.y * window.innerHeight;
+  d.style.transform = `translate3d(${(px - DOT_SIZE / 2).toFixed(1)}px, ${(py - DOT_SIZE / 2).toFixed(1)}px, 0)`;
   d.style.opacity = msg.hasFace ? '1' : '0';
+  d.style.borderColor = msg.frozen ? 'rgba(255, 204, 0, 0.9)' : 'rgba(0, 229, 160, 0.9)';
+
+  if (msg.hasFace) {
+    updateTarget(px, py, msg.snap);
+  } else {
+    setTarget(null);
+  }
 
   // Hide if frames stop arriving (panel closed, tab switched away).
   clearTimeout(hideTimer);
   hideTimer = window.setTimeout(() => {
     if (dot) dot.style.opacity = '0';
+    setTarget(null);
   }, 400);
+}
+
+// ---------------------------------------------------------------------------
+// Interactive-element targeting: keep a registry of clickable elements,
+// highlight the one nearest the gaze point, click it on wink.
+
+const TARGET_SELECTOR =
+  'a[href], button, input, select, textarea, [role="button"], [onclick], [tabindex]';
+
+let targetEls: HTMLElement[] = [];
+let needsQuery = true;
+let needsRects = true;
+let lastQueryAt = 0;
+let rects: DOMRect[] = [];
+
+const observer = new MutationObserver(() => {
+  needsQuery = true;
+});
+observer.observe(document.documentElement, { childList: true, subtree: true });
+window.addEventListener('scroll', () => (needsRects = true), { capture: true, passive: true });
+window.addEventListener('resize', () => (needsRects = true), { passive: true });
+
+function refreshTargets(now: number): void {
+  if (needsQuery && now - lastQueryAt > 300) {
+    lastQueryAt = now;
+    needsQuery = false;
+    targetEls = (Array.from(document.querySelectorAll(TARGET_SELECTOR)) as HTMLElement[]).filter(
+      (el) => !(el as HTMLButtonElement).disabled && (el.checkVisibility?.() ?? true),
+    );
+    needsRects = true;
+  }
+  if (needsRects) {
+    needsRects = false;
+    rects = targetEls.map((el) => el.getBoundingClientRect());
+  }
+}
+
+/** Distance from a point to a rect's edge; 0 when the point is inside. */
+function rectDistance(r: DOMRect, x: number, y: number): number {
+  const dx = Math.max(r.left - x, 0, x - r.right);
+  const dy = Math.max(r.top - y, 0, y - r.bottom);
+  return Math.hypot(dx, dy);
+}
+
+let target: HTMLElement | null = null;
+let savedOutline = '';
+let savedOutlineOffset = '';
+
+function setTarget(el: HTMLElement | null): void {
+  if (el === target) return;
+  if (target) {
+    target.style.outline = savedOutline;
+    target.style.outlineOffset = savedOutlineOffset;
+  }
+  target = el;
+  if (target) {
+    savedOutline = target.style.outline;
+    savedOutlineOffset = target.style.outlineOffset;
+    target.style.outline = '3px solid #00e5a0';
+    target.style.outlineOffset = '2px';
+  }
+}
+
+function updateTarget(px: number, py: number, snapRadius: number): void {
+  refreshTargets(performance.now());
+  let best: HTMLElement | null = null;
+  let bestDist = snapRadius;
+  for (let i = 0; i < targetEls.length; i++) {
+    const r = rects[i];
+    if (r.width < 4 || r.height < 4) continue;
+    if (r.bottom < 0 || r.top > window.innerHeight || r.right < 0 || r.left > window.innerWidth) {
+      continue;
+    }
+    const dist = rectDistance(r, px, py);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = targetEls[i];
+    }
+  }
+  setTarget(best);
+}
+
+function flashTarget(el: HTMLElement): void {
+  el.style.outline = '3px solid #ffcc00';
+  setTimeout(() => {
+    if (el === target) el.style.outline = '3px solid #00e5a0';
+  }, 200);
+}
+
+function dispatchClick(el: HTMLElement, side: 'left' | 'right'): void {
+  const r = el.getBoundingClientRect();
+  const cx = r.left + r.width / 2;
+  const cy = r.top + r.height / 2;
+  const base = {
+    bubbles: true,
+    cancelable: true,
+    composed: true,
+    view: window,
+    clientX: cx,
+    clientY: cy,
+    button: side === 'left' ? 0 : 2,
+    buttons: side === 'left' ? 1 : 2,
+  };
+  const pointer = { ...base, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+
+  flashTarget(el);
+  if (side === 'left') {
+    el.dispatchEvent(new PointerEvent('pointerdown', pointer));
+    el.dispatchEvent(new MouseEvent('mousedown', base));
+    el.dispatchEvent(new PointerEvent('pointerup', pointer));
+    el.dispatchEvent(new MouseEvent('mouseup', base));
+    el.dispatchEvent(new MouseEvent('click', base));
+    if (el.matches('input, select, textarea, [contenteditable]')) {
+      el.focus();
+    }
+  } else {
+    el.dispatchEvent(new MouseEvent('contextmenu', base));
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -175,9 +301,12 @@ chrome.runtime.onConnect.addListener((port) => {
       if (calibration) {
         calibration.onFrame(raw);
         if (dot) dot.style.opacity = '0';
+        setTarget(null);
       } else {
         onGazeFrame(raw);
       }
+    } else if (raw.type === 'WINK') {
+      if (!calibration && target) dispatchClick(target, raw.side);
     }
   });
 });
