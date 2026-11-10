@@ -5,8 +5,18 @@ import {
   FilesetResolver,
   type FaceLandmarkerResult,
 } from '@mediapipe/tasks-vision';
-import { EmaSmoother, extractFeatures, rawGazePoint } from './gaze';
+import { extractFeatures, rawGazePoint } from './gaze';
+import {
+  applyCalibration,
+  featureVector,
+  fitCalibration,
+  isUsableCalibration,
+  type Calibration,
+} from './calibration';
+import { OneEuroFilter } from './oneeuro';
+import { loadSettings, saveSettings, SLIDERS, type Settings } from './settings';
 import { TabLink } from './tablink';
+import type { CalCancelMsg, CalResultMsg } from '../shared/messages';
 
 const video = document.getElementById('video') as HTMLVideoElement;
 const overlay = document.getElementById('overlay') as HTMLCanvasElement;
@@ -14,8 +24,11 @@ const cameraMsg = document.getElementById('camera-msg') as HTMLDivElement;
 const statusPill = document.getElementById('status-pill') as HTMLSpanElement;
 const btnGrant = document.getElementById('btn-grant') as HTMLButtonElement;
 
+const btnCalibrate = document.getElementById('btn-calibrate') as HTMLButtonElement;
 const btnToggleGaze = document.getElementById('btn-toggle-gaze') as HTMLButtonElement;
 const btnDemo = document.getElementById('btn-demo') as HTMLButtonElement;
+const btnResetCal = document.getElementById('btn-reset-cal') as HTMLButtonElement;
+const slidersBox = document.getElementById('sliders') as HTMLDivElement;
 
 const stat = {
   face: document.getElementById('stat-face') as HTMLElement,
@@ -23,7 +36,35 @@ const stat = {
   blinkL: document.getElementById('stat-blink-l') as HTMLElement,
   blinkR: document.getElementById('stat-blink-r') as HTMLElement,
   gaze: document.getElementById('stat-gaze') as HTMLElement,
+  cal: document.getElementById('stat-cal') as HTMLElement,
 };
+
+function clamp01(v: number): number {
+  return Math.min(1, Math.max(0, v));
+}
+
+function buildSliders(settings: Settings, onChange: () => void): void {
+  for (const spec of SLIDERS) {
+    const label = document.createElement('label');
+    const val = document.createElement('span');
+    val.className = 'val';
+    val.textContent = String(settings[spec.key]);
+    label.append(spec.label, val);
+    const input = document.createElement('input');
+    input.type = 'range';
+    input.min = String(spec.min);
+    input.max = String(spec.max);
+    input.step = String(spec.step);
+    input.value = String(settings[spec.key]);
+    input.addEventListener('input', () => {
+      settings[spec.key] = Number(input.value);
+      val.textContent = input.value;
+      saveSettings(settings);
+      onChange();
+    });
+    slidersBox.append(label, input);
+  }
+}
 
 function setStatus(text: string, kind: 'ok' | 'err' | 'off') {
   statusPill.textContent = text;
@@ -154,8 +195,32 @@ async function main() {
   const utils = new DrawingUtils(ctx);
 
   const tabLink = new TabLink();
-  const smoother = new EmaSmoother(0.3);
   let gazeEnabled = true;
+  let calibrating = false;
+  let calibrationData: Calibration | null = null;
+
+  const settings = await loadSettings();
+  const filterX = new OneEuroFilter(settings.smoothMinCutoff, settings.smoothBeta);
+  const filterY = new OneEuroFilter(settings.smoothMinCutoff, settings.smoothBeta);
+  const applySmoothing = () => {
+    filterX.minCutoff = filterY.minCutoff = settings.smoothMinCutoff;
+    filterX.beta = filterY.beta = settings.smoothBeta;
+  };
+  buildSliders(settings, applySmoothing);
+
+  const setCalibrated = (cal: Calibration | null) => {
+    calibrationData = cal;
+    stat.cal.textContent = cal ? 'yes' : 'no';
+    void chrome.storage.local.set({ calibration: cal });
+  };
+
+  // Restore a persisted calibration if its feature layout still matches.
+  const stored = await chrome.storage.local.get('calibration');
+  const featLen = featureVector({ eyeX: 0, eyeY: 0, yaw: 0, pitch: 0 }).length;
+  if (isUsableCalibration(stored.calibration, featLen)) {
+    calibrationData = stored.calibration;
+    stat.cal.textContent = 'yes';
+  }
 
   btnToggleGaze.disabled = false;
   btnToggleGaze.classList.add('active');
@@ -166,6 +231,41 @@ async function main() {
 
   btnDemo.addEventListener('click', () => {
     chrome.tabs.create({ url: chrome.runtime.getURL('demo.html') });
+  });
+
+  btnCalibrate.disabled = false;
+  btnCalibrate.addEventListener('click', async () => {
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+      if (!tab?.id) throw new Error('no active tab');
+      await chrome.tabs.sendMessage(tab.id, { type: 'CAL_START' });
+      calibrating = true;
+      btnCalibrate.classList.add('active');
+    } catch {
+      setStatus('open a web page (or the demo page) first', 'err');
+      setTimeout(() => setStatus('tracking', 'ok'), 2500);
+    }
+  });
+
+  btnResetCal.addEventListener('click', () => setCalibrated(null));
+
+  chrome.runtime.onMessage.addListener((msg: CalResultMsg | CalCancelMsg) => {
+    if (msg.type === 'CAL_RESULT') {
+      calibrating = false;
+      btnCalibrate.classList.remove('active');
+      const cal = fitCalibration(msg.samples);
+      if (cal) {
+        setCalibrated(cal);
+        setStatus('calibrated', 'ok');
+        setTimeout(() => setStatus('tracking', 'ok'), 2000);
+      } else {
+        setStatus('calibration failed — try again', 'err');
+        setTimeout(() => setStatus('tracking', 'ok'), 2500);
+      }
+    } else if (msg.type === 'CAL_CANCEL') {
+      calibrating = false;
+      btnCalibrate.classList.remove('active');
+    }
   });
 
   let fps = 0;
@@ -183,11 +283,19 @@ async function main() {
     const hasFace = result.faceLandmarks.length > 0;
     const features = hasFace ? extractFeatures(result) : null;
     let gaze: { x: number; y: number } | null = null;
+    let feat: number[] | undefined;
     if (features) {
-      const raw = rawGazePoint(features);
-      gaze = smoother.push(raw.x, raw.y);
+      feat = featureVector(features);
+      const mapped = calibrationData
+        ? applyCalibration(calibrationData, feat)
+        : rawGazePoint(features);
+      gaze = {
+        x: clamp01(filterX.filter(mapped.x, now / 1000)),
+        y: clamp01(filterY.filter(mapped.y, now / 1000)),
+      };
     } else {
-      smoother.reset();
+      filterX.reset();
+      filterY.reset();
     }
 
     if (gazeEnabled) {
@@ -197,6 +305,7 @@ async function main() {
         y: gaze?.y ?? 0.5,
         hasFace: gaze !== null,
         t: now,
+        feat: calibrating ? feat : undefined,
       });
     }
 

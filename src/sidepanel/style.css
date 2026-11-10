@@ -166,3 +166,37 @@ button.active {
   color: var(--muted);
   font-size: 11px;
 }
+
+.tuning {
+  background: var(--panel);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.tuning summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+
+.tuning label {
+  display: block;
+  margin: 10px 0 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.tuning label .val {
+  float: right;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.tuning input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.tuning #btn-reset-cal {
+  margin-top: 12px;
+  width: 100%;
+}

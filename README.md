@@ -19,7 +19,7 @@ One-day prototype, built in milestones:
 
 - [x] 1. Extension scaffold, side panel, camera preview with live face mesh
 - [x] 2. Raw (uncalibrated) gaze dot overlaid on the page
-- [ ] 3. 9-point calibration + smoothing
+- [x] 3. 9-point calibration + smoothing
 - [ ] 4. Interactive-element highlighting + wink-to-click
 - [ ] 5. Dwell scroll
 - [ ] 6. Dwell-activated on-screen keyboard

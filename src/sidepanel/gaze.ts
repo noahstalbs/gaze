@@ -68,26 +68,3 @@ export function rawGazePoint(f: GazeFeatures): { x: number; y: number } {
     y: clamp(0.5 + (GAIN_EYE_Y * f.eyeY + GAIN_HEAD_Y * f.pitch), 0, 1),
   };
 }
-
-/** Exponential moving average over gaze points; resets when the face is lost. */
-export class EmaSmoother {
-  private x: number | null = null;
-  private y: number | null = null;
-
-  constructor(public alpha: number) {}
-
-  push(x: number, y: number): { x: number; y: number } {
-    if (this.x === null || this.y === null) {
-      this.x = x;
-      this.y = y;
-    } else {
-      this.x += this.alpha * (x - this.x);
-      this.y += this.alpha * (y - this.y);
-    }
-    return { x: this.x, y: this.y };
-  }
-
-  reset(): void {
-    this.x = this.y = null;
-  }
-}
