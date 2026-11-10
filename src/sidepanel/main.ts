@@ -95,23 +95,50 @@ function drawMesh(utils: DrawingUtils, ctx: CanvasRenderingContext2D, result: Fa
   }
 }
 
-async function main() {
+// Chrome sometimes cannot show the permission prompt inside a side panel, so
+// on failure we point at grant.html and poll until the permission lands —
+// the user should never have to close and reopen the panel.
+async function acquireCamera(): Promise<void> {
   try {
     await initCamera();
-  } catch (err) {
-    console.error('[gaze] camera failed', err);
-    setStatus('camera blocked', 'err');
-    showCameraMessage(
-      'Camera access was blocked. Chrome sometimes cannot show the permission ' +
-        'prompt inside a side panel — use the button below to grant it from a ' +
-        'regular tab, then reopen this panel.',
-    );
-    btnGrant.classList.remove('hidden');
-    btnGrant.addEventListener('click', () => {
-      chrome.tabs.create({ url: chrome.runtime.getURL('grant.html') });
-    });
     return;
+  } catch (err) {
+    console.warn('[gaze] camera blocked, polling for permission', err);
   }
+
+  setStatus('camera blocked', 'err');
+  showCameraMessage(
+    'Camera access was blocked. Chrome sometimes cannot show the permission ' +
+      'prompt inside a side panel — use the button below to grant it from a ' +
+      'regular tab. This panel picks it up automatically.',
+  );
+  btnGrant.classList.remove('hidden');
+  const openGrant = () => chrome.tabs.create({ url: chrome.runtime.getURL('grant.html') });
+  btnGrant.addEventListener('click', openGrant);
+
+  await new Promise<void>((resolve) => {
+    let busy = false;
+    const timer = setInterval(async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        await initCamera();
+        clearInterval(timer);
+        resolve();
+      } catch {
+        // still blocked (or camera briefly held by the grant tab) — keep polling
+      } finally {
+        busy = false;
+      }
+    }, 1500);
+  });
+
+  btnGrant.classList.add('hidden');
+  btnGrant.removeEventListener('click', openGrant);
+}
+
+async function main() {
+  await acquireCamera();
 
   setStatus('loading model…', 'off');
   showCameraMessage(null);
