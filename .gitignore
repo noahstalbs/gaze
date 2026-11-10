@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# MediaPipe WASM binaries — regenerated from node_modules by scripts/copy-assets.mjs
+public/wasm/
+
+# OS cruft
+.DS_Store
+
+# Local env / secrets — never commit credentials
+.env
+.env.*
+*.local
+
+# Local tooling logs
+logs/

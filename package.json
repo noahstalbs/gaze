@@ -1,0 +1,23 @@
+{
+  "name": "gaze",
+  "version": "0.1.0",
+  "description": "Chrome extension: control a web page with your eyes via the webcam. Local-only processing.",
+  "scripts": {
+    "build": "node scripts/copy-assets.mjs && vite build && vite build --config vite.content.config.ts",
+    "typecheck": "tsc --noEmit",
+    "fetch-model": "curl -L --fail --create-dirs -o public/models/face_landmarker.task https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "devDependencies": {
+    "@types/chrome": "0.3.7",
+    "typescript": "7.0.2",
+    "vite": "8.3.7"
+  },
+  "dependencies": {
+    "@mediapipe/tasks-vision": "1.2.2"
+  },
+  "private": true
+}

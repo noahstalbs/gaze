@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Gaze — camera permission</title>
+    <style>
+      body {
+        font: 15px/1.5 system-ui, sans-serif;
+        background: #15171c;
+        color: #e8eaed;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        margin: 0;
+      }
+      main { max-width: 420px; text-align: center; }
+      button {
+        font: inherit;
+        padding: 10px 18px;
+        border-radius: 8px;
+        border: none;
+        background: #00e5a0;
+        color: #04150f;
+        cursor: pointer;
+      }
+      #result { color: #9aa0a6; min-height: 3em; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Gaze camera permission</h1>
+      <p>
+        Grant camera access to the Gaze extension here. It is granted once to
+        the extension itself — individual websites never get camera access.
+      </p>
+      <button id="grant">Allow camera</button>
+      <p id="result"></p>
+    </main>
+    <script type="module" src="/src/grant.ts"></script>
+  </body>
+</html>

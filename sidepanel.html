@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gaze</title>
+  </head>
+  <body>
+    <main>
+      <header>
+        <h1>Gaze</h1>
+        <span id="status-pill" class="pill pill-off">starting…</span>
+      </header>
+
+      <section class="camera">
+        <div class="video-wrap">
+          <video id="video" autoplay playsinline muted></video>
+          <canvas id="overlay"></canvas>
+          <div id="camera-msg" class="camera-msg">Starting camera…</div>
+        </div>
+        <button id="btn-grant" class="hidden">Grant camera access</button>
+      </section>
+
+      <section class="controls">
+        <button id="btn-calibrate" disabled>Calibrate</button>
+        <button id="btn-toggle-gaze" disabled>Gaze control</button>
+        <button id="btn-toggle-keyboard" disabled>Keyboard</button>
+        <button id="btn-wink-mode" disabled>Wink mode</button>
+      </section>
+
+      <section class="stats">
+        <dl>
+          <div><dt>Face</dt><dd id="stat-face">–</dd></div>
+          <div><dt>FPS</dt><dd id="stat-fps">–</dd></div>
+          <div><dt>Blink L</dt><dd id="stat-blink-l">–</dd></div>
+          <div><dt>Blink R</dt><dd id="stat-blink-r">–</dd></div>
+          <div><dt>Gaze</dt><dd id="stat-gaze">–</dd></div>
+        </dl>
+      </section>
+
+      <p class="note">
+        Buttons unlock as milestones land. All processing is local — no video
+        ever leaves this machine.
+      </p>
+    </main>
+    <script type="module" src="/src/sidepanel/main.ts"></script>
+  </body>
+</html>
